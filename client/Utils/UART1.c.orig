@@ -1,0 +1,297 @@
+#include "UART1.h"
+
+#define MAXSIZE_USART1 20
+#define MAXSIZE_USART2 300 //空间一定要大，不然ESP01S发送给STM32的数据在USART2ISR中会产生地址越界，执行不到"\r\nOK\r\n" or "ERROR\r\n",导致USART2ISR卡死
+SemaphoreHandle_t semaphore1;
+SemaphoreHandle_t semaphore2;
+SemaphoreHandle_t semaphore3;
+static char str1[MAXSIZE_USART1];
+static uint32_t Subscript1 = 0;
+static char str2[MAXSIZE_USART2];
+static uint32_t Subscript2 = 0;
+static char *str3[2];
+static uint32_t Subscript3 = 0;
+static uint32_t Row_Subscript3 = 0;
+char WIFI[1024] = {0};
+
+
+//PC端口
+void USART1_Init(SemaphoreHandle_t *semaphore1) {
+    // 开启时钟
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_USART1, ENABLE);
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE);
+
+    // 配置 GPIOA9 为 TX
+    GPIO_InitTypeDef GPIO_InitStructure;
+    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF_PP;
+    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_9;
+    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+    GPIO_Init(GPIOA, &GPIO_InitStructure);
+
+    // 配置 GPIOA10 为 RX
+    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IN_FLOATING;
+    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_10;
+    GPIO_Init(GPIOA, &GPIO_InitStructure);
+
+    // 配置 USART1
+    USART_InitTypeDef USART_InitStructure;
+    USART_InitStructure.USART_BaudRate = 115200;
+    USART_InitStructure.USART_HardwareFlowControl = USART_HardwareFlowControl_None;
+    USART_InitStructure.USART_Mode = USART_Mode_Tx | USART_Mode_Rx;
+    USART_InitStructure.USART_Parity = USART_Parity_No;
+    USART_InitStructure.USART_StopBits = USART_StopBits_1;
+    USART_InitStructure.USART_WordLength = USART_WordLength_8b;
+    USART_Init(USART1, &USART_InitStructure);
+
+    // 启动 USART1
+    USART_Cmd(USART1, ENABLE);
+
+    // 开启中断
+    USART_ITConfig(USART1, USART_IT_RXNE, ENABLE);
+
+    // NVIC 配置
+    NVIC_InitTypeDef NVIC_InitStruct;
+    NVIC_InitStruct.NVIC_IRQChannel = USART1_IRQn;
+    NVIC_InitStruct.NVIC_IRQChannelCmd = ENABLE;
+    NVIC_InitStruct.NVIC_IRQChannelPreemptionPriority = 1;
+    NVIC_InitStruct.NVIC_IRQChannelSubPriority = 1;
+    NVIC_Init(&NVIC_InitStruct);
+
+    // 创建互斥信号量
+    *semaphore1 = xSemaphoreCreateMutex();
+    xSemaphoreGive(*semaphore1);
+}
+
+
+//esp01s
+void USART2_Init(SemaphoreHandle_t *semaphore2) {
+    // 开启时钟
+    RCC_APB1PeriphClockCmd(RCC_APB1Periph_USART2, ENABLE);  // USART2 用 APB1
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE);   // GPIOA 仍用 APB2
+
+    // 配置 GPIOA2 为 TX
+    GPIO_InitTypeDef GPIO_InitStructure;
+    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF_PP;
+    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_2;
+    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+    GPIO_Init(GPIOA, &GPIO_InitStructure);
+
+    // 配置 GPIOA3 为 RX
+    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IN_FLOATING;
+    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_3;
+    GPIO_Init(GPIOA, &GPIO_InitStructure);
+
+    // 配置 USART2
+    USART_InitTypeDef USART_InitStructure;
+    USART_InitStructure.USART_BaudRate = 115200;
+    USART_InitStructure.USART_HardwareFlowControl = USART_HardwareFlowControl_None;
+    USART_InitStructure.USART_Mode = USART_Mode_Tx | USART_Mode_Rx;
+    USART_InitStructure.USART_Parity = USART_Parity_No;
+    USART_InitStructure.USART_StopBits = USART_StopBits_1;
+    USART_InitStructure.USART_WordLength = USART_WordLength_8b;
+    USART_Init(USART2, &USART_InitStructure);
+
+    // 启动 USART2
+    USART_Cmd(USART2, ENABLE);
+
+    // 开启中断
+    USART_ITConfig(USART2, USART_IT_RXNE, ENABLE);
+
+    // NVIC 配置
+    NVIC_InitTypeDef NVIC_InitStruct;
+    NVIC_InitStruct.NVIC_IRQChannel = USART2_IRQn;
+    NVIC_InitStruct.NVIC_IRQChannelCmd = ENABLE;
+    NVIC_InitStruct.NVIC_IRQChannelPreemptionPriority = 1;
+    NVIC_InitStruct.NVIC_IRQChannelSubPriority = 1;
+    NVIC_Init(&NVIC_InitStruct);
+
+    // 创建互斥信号量
+    *semaphore2 = xSemaphoreCreateMutex();
+    xSemaphoreGive(*semaphore2);
+}
+
+//HC05
+void USART3_Init(SemaphoreHandle_t *semaphore3) {
+    // 开启时钟
+    RCC_APB1PeriphClockCmd(RCC_APB1Periph_USART3, ENABLE);  // USART3 用 APB1
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB, ENABLE);   // GPIOB 仍用 APB2
+
+    // 配置 GPIOB10 为 TX
+    GPIO_InitTypeDef GPIO_InitStructure;
+    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF_PP;
+    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_10;
+    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+    GPIO_Init(GPIOB, &GPIO_InitStructure);
+
+    // 配置 GPIOB11 为 RX
+    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IN_FLOATING;
+    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_11;
+    GPIO_Init(GPIOB, &GPIO_InitStructure);
+
+    // 配置 USART2
+    USART_InitTypeDef USART_InitStructure;
+    USART_InitStructure.USART_BaudRate = 115200;
+    USART_InitStructure.USART_HardwareFlowControl = USART_HardwareFlowControl_None;
+    USART_InitStructure.USART_Mode = USART_Mode_Tx | USART_Mode_Rx;
+    USART_InitStructure.USART_Parity = USART_Parity_No;
+    USART_InitStructure.USART_StopBits = USART_StopBits_1;
+    USART_InitStructure.USART_WordLength = USART_WordLength_8b;
+    USART_Init(USART3, &USART_InitStructure);
+
+    // 启动 USART2
+    USART_Cmd(USART3, ENABLE);
+
+    // 开启中断
+    USART_ITConfig(USART3, USART_IT_RXNE, ENABLE);
+
+    // NVIC 配置
+    NVIC_InitTypeDef NVIC_InitStruct;
+    NVIC_InitStruct.NVIC_IRQChannel = USART3_IRQn;
+    NVIC_InitStruct.NVIC_IRQChannelCmd = ENABLE;
+    NVIC_InitStruct.NVIC_IRQChannelPreemptionPriority = 1;
+    NVIC_InitStruct.NVIC_IRQChannelSubPriority = 1;
+    NVIC_Init(&NVIC_InitStruct);
+
+    // 创建互斥信号量
+    *semaphore3 = xSemaphoreCreateMutex();
+    xSemaphoreGive(*semaphore3);
+}
+
+/*
+USART_TypeDef* USARTx:USART1 or USART2
+*/
+void USARTX_ClearRDR(USART_TypeDef* USARTx) {
+    while (USART_GetFlagStatus(USARTx, USART_FLAG_RXNE) == SET) {
+        USART_ReceiveData(USARTx); // 读取但不存储
+    }		//类似C语言的while(getchar());
+}
+
+/*
+USART_TypeDef* USARTx:USART1 or USART2
+*/
+// 发送字节
+void USART_SendByte(USART_TypeDef* USARTx, uint8_t Byte) {
+    USART_SendData(USARTx, Byte);
+
+    while (USART_GetFlagStatus(USARTx, USART_FLAG_TXE) == RESET);
+}
+
+//PC
+void USART1_IRQHandler(void) {
+    if (USART_GetITStatus(USART1, USART_IT_RXNE) == SET) {
+        uint8_t temp = (uint8_t)USART_ReceiveData(USART1);
+
+        if (Subscript1 < MAXSIZE_USART1 - 1) {
+            str1[Subscript1++] = temp;
+        }
+
+        // 判断是否遇到 \r\n，作为结束标志
+        if (Subscript1 >= 2 &&
+                str1[Subscript1 - 2] == '\r' &&
+                str1[Subscript1 - 1] == '\n') {
+
+            str1[Subscript1] = '\0';  // 加字符串终止符
+            printf1(USART2_PRINT, "%s", str1);
+
+            Subscript1 = 0;
+            memset(str1, 0, sizeof(str1));
+            USARTX_ClearRDR(USART1);
+        }
+    }
+}
+
+
+void USART2_IRQHandler(void) {
+    if (USART_GetITStatus(USART2, USART_IT_RXNE) == SET) {
+        uint8_t temp = (uint8_t)USART_ReceiveData(USART2);
+
+        if (Subscript2 < MAXSIZE_USART2 - 1) {
+            str2[Subscript2++] = temp;
+        }
+
+        // 判断是否接收到完整结尾：以 \r\nOK\r\n 结尾（完整应答）
+        if (Subscript2 >= 6 && strncmp(&str2[Subscript2 - 6], "\r\nOK\r\n", 6) == 0) {
+
+            str2[Subscript2] = '\0';
+            printf1(USART1_PRINT, "%s", str2);
+            USARTX_ClearRDR(USART2);
+
+            // 清空缓冲
+            Subscript2 = 0;
+            memset(str2, 0, sizeof(str2));
+        }
+
+        // 也可以添加 ERROR 响应处理（选做）
+        else if (Subscript2 >= 7 &&
+                 strncmp(&str2[Subscript2 - 7], "ERROR\r\n", 7) == 0) {
+            str2[Subscript2] = '\0';
+            printf1(USART1_PRINT, "%s", str2);
+            USARTX_ClearRDR(USART2);
+            Subscript2 = 0;
+            memset(str2, 0, sizeof(str2));
+        } else if (Subscript2 == MAXSIZE_USART2 - 1) {
+            str2[Subscript2] = '\0';
+            printf1(USART1_PRINT, "%s", str2);
+            Subscript2 = 0;
+            memset(str2, 0, sizeof(str2));
+        } else { //当打印AT+CWLAP时，数组空间不够，所以需要发几次，当执行玩上面的if后，有概率让OK or ERROR拦腰截断在两个数组，导致不能进入上三个if语句
+            str2[Subscript2] = '\0';
+            printf1(USART1_PRINT, "%s", str2);
+            Subscript2 = 0;
+            memset(str2, 0, sizeof(str2));
+        }
+    }
+}
+
+void USART3_IRQHandler(void) {
+    if (USART_GetITStatus(USART3, USART_IT_RXNE) == SET) {
+        uint8_t temp = (uint8_t)USART_ReceiveData(USART3);
+
+        if (Subscript3 < MAXSIZE_USART2 - 1) {
+            str3[Row_Subscript3][Subscript3++] = temp;
+        }
+
+        // 判断是否接收到完整结尾：以 \r\nOK\r\n 结尾（完整应答）
+        if (Subscript3 >= 6 && strncmp(&str3[Row_Subscript3][Subscript3 - 6], "\r\nOK\r\n", 6) == 0) {
+
+            str3[Row_Subscript3][Subscript3] = '\0';
+            Row_Subscript3++;
+        }
+
+        if (Row_Subscript3 == 1) {
+            sprintf(WIFI, "AT+CWJAP_DEF=\"%s\",\"%s\"\r\n", str3[0], str3[1]);
+            printf1(USART2_PRINT, "%s", WIFI);
+			printf1(USART1_PRINT, "WIFI连接\n");
+            vTaskDelay(1000);
+            // 清空缓冲
+            Subscript3 = 0;
+            Row_Subscript3 = 0;
+            memset(str3, 0, sizeof(str3));
+            memset(WIFI, 0, sizeof(WIFI));
+        }
+    }
+}
+
+/*
+SemaphoreHandle_t semaphoreX:semaphore1 or semaphore2
+USART_TypeDef* USARTx:USART1 or USART2
+*/
+//pr中SemaphoreHandle_t semaphoreX不需要指针，不需要从函数中取内容
+void printf1(USART_TypeDef* USARTx, SemaphoreHandle_t semaphoreX, char *format, ...) {
+    //互斥信号量实现互斥
+    xSemaphoreTake(semaphoreX, portMAX_DELAY);
+    char strs[100];
+    va_list list;
+    va_start(list, format);
+    vsprintf(strs, format, list);
+    va_end(list);
+
+    for (uint8_t i = 0; strs[i] != '\0'; i++) {
+        USART_SendByte(USARTx, strs[i]);
+    }
+
+    xSemaphoreGive(semaphoreX);
+}
+
+
+

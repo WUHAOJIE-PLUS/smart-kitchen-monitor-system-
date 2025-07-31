@@ -1,0 +1,37 @@
+#include "TCP.h"
+
+void TCP_Connect() {
+	
+    //printf2("%s\r\n", "AT+CIPSTART=\"TCP\",\"47.115.220.165\",9052");
+	 printf1("----------------AT+CIPSTART-start----------------\r\n");
+	Delay_ms(1000);
+	printf2("%s\r\n", "AT+CIPSTART=\"TCP\",\"47.111.20.8\",9052");
+    Delay_ms(5000);
+	 printf1("----------------AT+CIPSTART-fin----------------\r\n");
+
+ printf1("----------------AT+CIPMODE=1_START----------------\r\n");
+    printf2("%s\r\n", "AT+CIPMODE=1");
+    Delay_ms(2000);
+	 printf1("----------------AT+CIPMODE=1_fin----------------\r\n");
+
+	printf1("----------------AT+CIPSEND_START----------------\r\n");
+    printf2("%s\r\n", "AT+CIPSEND");
+    Delay_ms(2000);
+	 printf1("----------------AT+CIPSEND-fin----------\r\n");
+
+}
+
+void TCP_Release() {
+	Delay_ms(2000);
+    printf2("%s", "+++");
+    Delay_ms(2000);
+
+
+    printf2("%s\r\n", "AT+CIPMODE=0");
+    Delay_ms(2000);
+
+
+    printf2("%s\r\n", "AT+CIPCLOSE");
+	Delay_ms(2000);
+}
+

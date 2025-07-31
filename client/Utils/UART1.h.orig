@@ -1,0 +1,32 @@
+// UART1.h
+#ifndef __UART1_H__
+#define __UART1_H__
+
+// STM32外设库头文件
+#include "FreeRTOS.h"    
+#include "stm32f10x.h" 
+#include <stdio.h>
+#include <stdarg.h>
+#include "queue.h"
+#include "task.h"
+#include "semphr.h"
+#include <string.h>
+
+//PA9 USART1_TX
+//PA10 USART1_RX
+
+//PA3 USART2_RX
+//PA2 USART2_TX
+
+#define USART1_PRINT USART1,semaphore1
+#define USART2_PRINT USART2,semaphore2
+
+extern SemaphoreHandle_t semaphore1;
+extern SemaphoreHandle_t semaphore2;
+
+void USART1_Init(SemaphoreHandle_t *semaphore1);
+void USART2_Init(SemaphoreHandle_t *semaphore2);
+void USART_SendByte(USART_TypeDef* USARTx,uint8_t Byte);
+void printf1(USART_TypeDef* USARTx,SemaphoreHandle_t semaphoreX,char *format, ...);
+#endif
+
